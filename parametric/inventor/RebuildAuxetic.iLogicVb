@@ -1,0 +1,242 @@
+' AX_NATIVE_REBUILD_V1
+' Native sketch/extrude construction, not a STEP import or transient BRep feature.
+' Target Inventor 2024-2026. Not executed/compiled in Inventor on this Linux host.
+' Run manually after changing User Parameters. Fixed work-plane orientations
+' are recomputed here, so Inventor Update alone is NOT sufficient after edits.
+Sub Main()
+    Dim doc As Inventor.PartDocument = TryCast(ThisDoc.Document, Inventor.PartDocument)
+    If doc Is Nothing Then Throw New Exception("Open a generated part document first.")
+    Dim def As Inventor.PartComponentDefinition = doc.ComponentDefinition
+    Dim up As Inventor.UserParameters = def.Parameters.UserParameters
+    If up.Item("AX_Managed").Value <> 1 Then Throw New Exception("This is not a managed auxetic part.")
+    Dim tx As Inventor.Transaction = Nothing
+    Try
+        ' Inventor database lengths are cm, angles radians. Convert to mm/deg.
+        Dim sf As Double = up.Item("ScaleFactor").Value
+        Dim l1 As Double = up.Item("L1_base").Value * 10 * sf
+        Dim l2 As Double = up.Item("L2_base").Value * 10 * sf
+        Dim diameter As Double = up.Item("D_base").Value * 10 * sf
+        Dim theta As Double = up.Item("Theta").Value
+        Dim phi As Double = up.Item("Phi").Value
+        If Not Finite(sf) OrElse sf <= 0 OrElse Not Finite(l1) OrElse Not Finite(l2) OrElse Not Finite(diameter) Then Throw New Exception("Lengths and scale must be finite and positive.")
+        If l1 <= 0 OrElse l2 <= 0 OrElse diameter <= 0 Then Throw New Exception("Lengths and diameter must be positive.")
+        If Not Finite(theta) OrElse Not Finite(phi) OrElse theta <= 0 OrElse theta >= 35.264389 * Math.PI / 180 OrElse phi <= 0 OrElse phi >= 54.735610 * Math.PI / 180 Then Throw New Exception("Angle range: 0 < Theta < 35.264389 deg; 0 < Phi < 54.735610 deg.")
+        Dim nx As Integer = CountValue(up.Item("Nx").Value)
+        Dim ny As Integer = CountValue(up.Item("Ny").Value)
+        Dim nz As Integer = CountValue(up.Item("Nz").Value)
+        If nx * ny * nz > 64 Then Throw New Exception("At most 64 cells are allowed in this version.")
+        Dim b As Double = l2 * Math.Cos(theta) / Math.Sqrt(2)
+        Dim l3 As Double = b / Math.Cos(phi)
+        Dim a As Double = b - l2 * Math.Sin(theta)
+        Dim c As Double = b - l3 * Math.Sin(phi) / Math.Sqrt(2)
+        Dim h As Double = a + l1
+        Dim radius As Double = diameter / 2
+        If a <= 0 OrElse c <= 0 OrElse h <= b OrElse b + radius >= h OrElse radius >= Math.Min(l1, Math.Min(l2, l3)) / 2 Then Throw New Exception("Invalid geometry: inset/length/diameter crosses the cell boundary. Increase L1_base or reduce D_base.")
+        Dim rods As New System.Collections.Generic.List(Of AXRod)()
+        Dim vertices As New System.Collections.Generic.Dictionary(Of String, Double())()
+        For ix As Integer = 0 To nx - 1
+            For iy As Integer = 0 To ny - 1
+                For iz As Integer = 0 To nz - 1
+                    AddCell(rods, vertices, b, a, c, h, V(ix * 2 * h, iy * 2 * h, iz * 2 * h))
+                Next
+            Next
+        Next
+        If rods.Count <> 54 * nx * ny * nz Then Throw New Exception("Unexpected member count.")
+        ' Conservative nonincident-cylinder interference check before modifying the part.
+        For i As Integer = 0 To rods.Count - 1
+            For j As Integer = i + 1 To rods.Count - 1
+                Dim r As AXRod = rods(i), s As AXRod = rods(j)
+                If r.K0 = s.K0 OrElse r.K0 = s.K1 OrElse r.K1 = s.K0 OrElse r.K1 = s.K1 Then Continue For
+                If SegmentDistance(r.P0, r.P1, s.P0, s.P1) <= diameter + 0.0000001 Then
+                    Throw New Exception("Nonincident members may interfere: " & i & ", " & j & ". Reduce D_base or change lengths/angles.")
+                End If
+            Next
+        Next
+        Dim ordered As New System.Collections.Generic.List(Of AXRod)()
+        Dim remaining As New System.Collections.Generic.List(Of AXRod)(rods)
+        Dim seen As New System.Collections.Generic.HashSet(Of String)()
+        While remaining.Count > 0
+            Dim chosen As Integer = -1
+            For i As Integer = 0 To remaining.Count - 1
+                If seen.Count = 0 OrElse seen.Contains(remaining(i).K0) OrElse seen.Contains(remaining(i).K1) Then
+                    chosen = i : Exit For
+                End If
+            Next
+            If chosen < 0 Then Throw New Exception("The centerline graph is disconnected.")
+            Dim rod As AXRod = remaining(chosen)
+            ordered.Add(rod) : seen.Add(rod.K0) : seen.Add(rod.K1) : remaining.RemoveAt(chosen)
+        End While
+        ' Only this generator's native feature tree may be rebuilt. Preserve any
+        ' downstream user work by refusing the rebuild when unrelated features exist.
+        For i As Integer = 1 To def.Features.Count
+            If Not def.Features.Item(i).Name.StartsWith("AX_") Then Throw New Exception("Non-generator feature found. Use a separate copy for downstream manual features.")
+        Next
+        tx = ThisApplication.TransactionManager.StartTransaction(doc, "Rebuild auxetic native features")
+        ' Reset dependent formulas; edit independent inputs, not these expressions.
+        up.Item("L1").Expression = "L1_base * ScaleFactor"
+        up.Item("L2").Expression = "L2_base * ScaleFactor"
+        up.Item("StrutDiameter").Expression = "D_base * ScaleFactor"
+        up.Item("CubeHalf").Expression = "L2 * cos(Theta) / sqrt(2)"
+        up.Item("L3").Expression = "CubeHalf / cos(Phi)"
+        up.Item("FaceInset").Expression = "CubeHalf - L2 * sin(Theta)"
+        up.Item("EdgeCoord").Expression = "CubeHalf - L3 * sin(Phi) / sqrt(2)"
+        up.Item("UnitPitch").Expression = "2 * (L1 + FaceInset)"
+        up.Item("SizeX").Expression = "Nx * UnitPitch"
+        up.Item("SizeY").Expression = "Ny * UnitPitch"
+        up.Item("SizeZ").Expression = "Nz * UnitPitch"
+        For i As Integer = def.Features.Count To 1 Step -1
+            def.Features.Item(i).Delete()
+        Next
+        For i As Integer = def.Sketches.Count To 1 Step -1
+            If def.Sketches.Item(i).Name.StartsWith("AX_") Then def.Sketches.Item(i).Delete()
+        Next
+        For i As Integer = def.WorkPlanes.Count To 1 Step -1
+            If def.WorkPlanes.Item(i).Name.StartsWith("AX_") Then def.WorkPlanes.Item(i).Delete()
+        Next
+        Dim tg As Inventor.TransientGeometry = ThisApplication.TransientGeometry
+        For i As Integer = 0 To ordered.Count - 1
+            Dim rod As AXRod = ordered(i)
+            Dim normal() As Double = Normalize(Subtract(rod.P1, rod.P0))
+            Dim helper() As Double = If(Math.Abs(normal(0)) < 0.8, V(1,0,0), V(0,1,0))
+            Dim ux() As Double = Normalize(Cross(helper, normal))
+            Dim uy() As Double = Cross(normal, ux)
+            Dim wp As Inventor.WorkPlane = def.WorkPlanes.AddFixed(tg.CreatePoint(rod.P0(0)/10, rod.P0(1)/10, rod.P0(2)/10), tg.CreateUnitVector(ux(0),ux(1),ux(2)), tg.CreateUnitVector(uy(0),uy(1),uy(2)))
+            wp.Name = "AX_Plane_" & i.ToString("D4")
+            Dim sketch As Inventor.PlanarSketch = def.Sketches.Add(wp)
+            sketch.Name = "AX_Circle_" & i.ToString("D4")
+            Dim center As Inventor.Point2d = sketch.ModelToSketchSpace(tg.CreatePoint(rod.P0(0)/10,rod.P0(1)/10,rod.P0(2)/10))
+            Dim circle As Inventor.SketchCircle = sketch.SketchCircles.AddByCenterRadius(center, radius/10)
+            sketch.GeometricConstraints.AddGround(circle.CenterSketchPoint)
+            Dim dimension As Inventor.DiameterDimConstraint = sketch.DimensionConstraints.AddDiameter(circle, tg.CreatePoint2d(center.X+diameter/10,center.Y+diameter/10), False)
+            dimension.Parameter.Expression = "StrutDiameter"
+            Dim profile As Inventor.Profile = sketch.Profiles.AddForSolid()
+            Dim operation As Inventor.PartFeatureOperationEnum = If(i = 0, Inventor.PartFeatureOperationEnum.kNewBodyOperation, Inventor.PartFeatureOperationEnum.kJoinOperation)
+            Dim ed As Inventor.ExtrudeDefinition = def.Features.ExtrudeFeatures.CreateExtrudeDefinition(profile, operation)
+            Dim sketchOrigin As Inventor.Point = sketch.SketchToModelSpace(tg.CreatePoint2d(0,0))
+            Dim sketchX As Inventor.Point = sketch.SketchToModelSpace(tg.CreatePoint2d(1,0))
+            Dim sketchY As Inventor.Point = sketch.SketchToModelSpace(tg.CreatePoint2d(0,1))
+            Dim sketchNormal As Inventor.Vector = sketchOrigin.VectorTo(sketchX).CrossProduct(sketchOrigin.VectorTo(sketchY))
+            Dim alignment As Double = sketchNormal.X*normal(0)+sketchNormal.Y*normal(1)+sketchNormal.Z*normal(2)
+            Dim direction As Inventor.PartFeatureExtentDirectionEnum = If(alignment>=0, Inventor.PartFeatureExtentDirectionEnum.kPositiveExtentDirection, Inventor.PartFeatureExtentDirectionEnum.kNegativeExtentDirection)
+            ed.SetDistanceExtent("L" & rod.Kind.ToString(), direction)
+            Dim feature As Inventor.ExtrudeFeature = def.Features.ExtrudeFeatures.Add(ed)
+            feature.Name = "AX_Strut" & rod.Kind.ToString() & "_" & i.ToString("D4")
+            wp.Visible = False : sketch.Visible = False
+        Next
+        If Not doc.Update2(False) Then Throw New Exception("Inventor Update failed.")
+        If def.SurfaceBodies.Count <> 1 OrElse Not def.SurfaceBodies.Item(1).IsSolid Then Throw New Exception("Expected one solid body after joins.")
+        For i As Integer = 1 To def.Features.Count
+            If def.Features.Item(i).HealthStatus <> Inventor.HealthStatusEnum.kUpToDateHealth Then Throw New Exception("Feature health failed: " & def.Features.Item(i).Name)
+        Next
+        tx.End() : tx = Nothing
+        ThisApplication.ActiveView.Fit()
+    Catch ex As Exception
+        If tx IsNot Nothing Then tx.Abort()
+        System.Windows.Forms.MessageBox.Show("Auxetic rebuild failed. The rebuild transaction was rolled back if started; earlier input edits are NOT undone. Correct parameters and rebuild before exporting." & vbCrLf & ex.Message, "Auxetic error")
+        Throw
+    End Try
+End Sub
+
+Class AXRod
+    Public P0() As Double
+    Public P1() As Double
+    Public K0 As String
+    Public K1 As String
+    Public Kind As Integer
+End Class
+
+Function Finite(x As Double) As Boolean
+    Return Not Double.IsNaN(x) AndAlso Not Double.IsInfinity(x)
+End Function
+Function CountValue(x As Double) As Integer
+    If Not Finite(x) OrElse x <> Math.Floor(x) OrElse x < 1 OrElse x > 10 Then Throw New Exception("Nx, Ny, Nz must be integers from 1 to 10.")
+    Return CInt(x)
+End Function
+Function V(x As Double,y As Double,z As Double) As Double()
+    Return New Double(){x,y,z}
+End Function
+Function Add(a() As Double,b() As Double) As Double()
+    Return V(a(0)+b(0),a(1)+b(1),a(2)+b(2))
+End Function
+Function Subtract(a() As Double,b() As Double) As Double()
+    Return V(a(0)-b(0),a(1)-b(1),a(2)-b(2))
+End Function
+Function Multiply(a() As Double,s As Double) As Double()
+    Return V(a(0)*s,a(1)*s,a(2)*s)
+End Function
+Function Dot(a() As Double,b() As Double) As Double
+    Return a(0)*b(0)+a(1)*b(1)+a(2)*b(2)
+End Function
+Function Cross(a() As Double,b() As Double) As Double()
+    Return V(a(1)*b(2)-a(2)*b(1),a(2)*b(0)-a(0)*b(2),a(0)*b(1)-a(1)*b(0))
+End Function
+Function Normalize(a() As Double) As Double()
+    Return Multiply(a,1/Math.Sqrt(Dot(a,a)))
+End Function
+Function Key(a() As Double) As String
+    Return Math.Round(a(0),8).ToString("F8",System.Globalization.CultureInfo.InvariantCulture) & "," & Math.Round(a(1),8).ToString("F8",System.Globalization.CultureInfo.InvariantCulture) & "," & Math.Round(a(2),8).ToString("F8",System.Globalization.CultureInfo.InvariantCulture)
+End Function
+Sub AddRod(rods As System.Collections.Generic.List(Of AXRod), vertices As System.Collections.Generic.Dictionary(Of String,Double()), p0() As Double, p1() As Double, kind As Integer, offset() As Double)
+    Dim r As New AXRod()
+    r.P0=Add(p0,offset):r.P1=Add(p1,offset):r.K0=Key(r.P0):r.K1=Key(r.P1):r.Kind=kind
+    rods.Add(r)
+    If Not vertices.ContainsKey(r.K0) Then vertices.Add(r.K0,r.P0)
+    If Not vertices.ContainsKey(r.K1) Then vertices.Add(r.K1,r.P1)
+End Sub
+Sub AddCell(rods As System.Collections.Generic.List(Of AXRod), vertices As System.Collections.Generic.Dictionary(Of String,Double()), b As Double,a As Double,c As Double,h As Double,offset() As Double)
+    Dim corners As New System.Collections.Generic.List(Of Double())()
+    For Each sx As Integer In New Integer(){-1,1}
+        For Each sy As Integer In New Integer(){-1,1}
+            For Each sz As Integer In New Integer(){-1,1}
+                corners.Add(V(sx*b,sy*b,sz*b))
+            Next
+        Next
+    Next
+    For axis As Integer = 0 To 2
+        For Each sign As Integer In New Integer(){-1,1}
+            Dim inner() As Double=V(0,0,0),outer() As Double=V(0,0,0)
+            inner(axis)=sign*a:outer(axis)=sign*h
+            AddRod(rods,vertices,inner,outer,1,offset)
+            For Each corner As Double() In corners
+                If corner(axis)*sign>0 Then AddRod(rods,vertices,corner,inner,2,offset)
+            Next
+        Next
+        Dim others As New System.Collections.Generic.List(Of Integer)()
+        For j As Integer = 0 To 2
+            If j<>axis Then others.Add(j)
+        Next
+        For Each s1 As Integer In New Integer(){-1,1}
+            For Each s2 As Integer In New Integer(){-1,1}
+                Dim mid() As Double=V(0,0,0)
+                mid(others(0))=s1*c:mid(others(1))=s2*c
+                For Each corner As Double() In corners
+                    If corner(others(0))*s1>0 AndAlso corner(others(1))*s2>0 Then AddRod(rods,vertices,corner,mid,3,offset)
+                Next
+            Next
+        Next
+    Next
+End Sub
+Function Clamp01(x As Double) As Double
+    Return Math.Max(0,Math.Min(1,x))
+End Function
+Function Norm(a() As Double) As Double
+    Return Math.Sqrt(Dot(a,a))
+End Function
+Function SegmentDistance(p0() As Double,p1() As Double,q0() As Double,q1() As Double) As Double
+    Dim u() As Double=Subtract(p1,p0),v0() As Double=Subtract(q1,q0),w() As Double=Subtract(p0,q0)
+    Dim aa As Double=Dot(u,u),bb As Double=Dot(u,v0),cc As Double=Dot(v0,v0),dd As Double=Dot(u,w),ee As Double=Dot(v0,w)
+    Dim det As Double=aa*cc-bb*bb,best As Double=Double.PositiveInfinity
+    If det>0.000000000001*aa*cc Then
+        Dim s As Double=(bb*ee-cc*dd)/det,t As Double=(aa*ee-bb*dd)/det
+        If s>=0 AndAlso s<=1 AndAlso t>=0 AndAlso t<=1 Then best=Norm(Subtract(Add(w,Multiply(u,s)),Multiply(v0,t)))
+    End If
+    For Each s As Double In New Double(){0,1}
+        Dim t As Double=Clamp01((ee+s*bb)/cc)
+        best=Math.Min(best,Norm(Subtract(Add(w,Multiply(u,s)),Multiply(v0,t))))
+    Next
+    For Each t As Double In New Double(){0,1}
+        Dim s As Double=Clamp01((t*bb-dd)/aa)
+        best=Math.Min(best,Norm(Subtract(Add(w,Multiply(u,s)),Multiply(v0,t))))
+    Next
+    Return best
+End Function

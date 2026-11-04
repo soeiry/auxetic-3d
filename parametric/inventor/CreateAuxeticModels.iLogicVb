@@ -1,0 +1,103 @@
+' Target: full Autodesk Inventor 2024-2026, Windows, iLogic.
+' NOT executed or compiled against Inventor in the Linux build environment.
+' Run as an EXTERNAL iLogic rule from a blank part document.
+Sub Main()
+    Dim pick As New System.Windows.Forms.OpenFileDialog()
+    pick.Title = "Choose RebuildAuxetic.iLogicVb from the downloaded inventor folder"
+    pick.Filter = "iLogic source (*.iLogicVb)|*.iLogicVb|All files (*.*)|*.*"
+    If pick.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then Return
+    Dim source As String = System.IO.File.ReadAllText(pick.FileName, System.Text.Encoding.UTF8)
+    If Not source.Contains("AX_NATIVE_REBUILD_V1") Then
+        Throw New Exception("Choose the supplied RebuildAuxetic.iLogicVb file.")
+    End If
+    Dim configPick As New System.Windows.Forms.OpenFileDialog()
+    configPick.Title = "Choose config/paper_default.json (same input file as CadQuery)"
+    configPick.Filter = "Auxetic parameters (*.json)|*.json"
+    If configPick.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then Return
+    Dim inputs As System.Collections.Generic.Dictionary(Of String,Double) = ReadInputs(configPick.FileName)
+    Dim folder As New System.Windows.Forms.FolderBrowserDialog()
+    folder.Description = "Choose a folder for the two native Inventor IPT files"
+    If folder.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then Return
+    Dim latticeName As String = "lattice_" & NumberText(inputs("Nx")) & "x" & NumberText(inputs("Ny")) & "x" & NumberText(inputs("Nz")) & "_parametric.ipt"
+    Dim names() As String = {"unit_cell_parametric.ipt", latticeName}
+    For Each name As String In names
+        If System.IO.File.Exists(System.IO.Path.Combine(folder.SelectedPath, name)) Then
+            Throw New Exception("Output already exists: " & name & ". Choose another folder to preserve it.")
+        End If
+    Next
+    For modelIndex As Integer = 0 To 1
+        Dim template As String = ThisApplication.FileManager.GetTemplateFile(Inventor.DocumentTypeEnum.kPartDocumentObject)
+        Dim doc As Inventor.PartDocument = CType(ThisApplication.Documents.Add(Inventor.DocumentTypeEnum.kPartDocumentObject, template, True), Inventor.PartDocument)
+        doc.UnitsOfMeasure.LengthUnits = Inventor.UnitsTypeEnum.kMillimeterLengthUnits
+        doc.UnitsOfMeasure.AngleUnits = Inventor.UnitsTypeEnum.kDegreeAngleUnits
+        Dim up As Inventor.UserParameters = doc.ComponentDefinition.Parameters.UserParameters
+        ' Independent parameters: use Manage > Parameters after creation.
+        AddP(up, "L1_base", NumberText(inputs("L1_base")) & " mm", "mm")
+        AddP(up, "L2_base", NumberText(inputs("L2_base")) & " mm", "mm")
+        AddP(up, "D_base", NumberText(inputs("D_base")) & " mm", "mm")
+        AddP(up, "Theta", NumberText(inputs("Theta")) & " deg", "deg")
+        AddP(up, "Phi", NumberText(inputs("Phi")) & " deg", "deg")
+        AddP(up, "ScaleFactor", NumberText(inputs("ScaleFactor")), "ul")
+        For Each axis As String In New String(){"Nx","Ny","Nz"}
+            AddP(up, axis, If(modelIndex=0,"1",NumberText(inputs(axis))), "ul")
+        Next
+        AddP(up, "AX_Managed", "1", "ul")
+        AddP(up, "L1", "L1_base * ScaleFactor", "mm")
+        AddP(up, "L2", "L2_base * ScaleFactor", "mm")
+        AddP(up, "StrutDiameter", "D_base * ScaleFactor", "mm")
+        AddP(up, "CubeHalf", "L2 * cos(Theta) / sqrt(2)", "mm")
+        AddP(up, "L3", "CubeHalf / cos(Phi)", "mm")
+        AddP(up, "FaceInset", "CubeHalf - L2 * sin(Theta)", "mm")
+        AddP(up, "EdgeCoord", "CubeHalf - L3 * sin(Phi) / sqrt(2)", "mm")
+        AddP(up, "UnitPitch", "2 * (L1 + FaceInset)", "mm")
+        AddP(up, "SizeX", "Nx * UnitPitch", "mm")
+        AddP(up, "SizeY", "Ny * UnitPitch", "mm")
+        AddP(up, "SizeZ", "Nz * UnitPitch", "mm")
+        ' Embed the full rebuild source in each IPT; no STEP import is performed.
+        Dim automation As Object = iLogicVb.Automation
+        automation.AddRule(doc, "RebuildAuxetic", source)
+        ' AddRule can execute the new rule; the rule is also safe to run again.
+        Dim result As Integer = automation.RunRule(doc, "RebuildAuxetic")
+        If result <> 0 Then Throw New Exception("RebuildAuxetic failed, iLogic result = " & result)
+        If Not doc.Update2(False) OrElse doc.ComponentDefinition.SurfaceBodies.Count <> 1 Then
+            Throw New Exception("Native model is not a single updated body; IPT was not saved.")
+        End If
+        doc.SaveAs(System.IO.Path.Combine(folder.SelectedPath, names(modelIndex)), False)
+        ThisApplication.ActiveView.Fit()
+    Next
+    System.Windows.Forms.MessageBox.Show("Created two native IPT files. To edit: Manage > Parameters, then run embedded RebuildAuxetic and Update. See the Korean guide.", "Auxetic")
+End Sub
+
+Function NumberText(x As Double) As String
+    Return x.ToString("R",System.Globalization.CultureInfo.InvariantCulture)
+End Function
+
+Function ReadInputs(path As String) As System.Collections.Generic.Dictionary(Of String,Double)
+    ' The delivered schema is a flat numeric JSON object. No JSON runtime or
+    ' version-specific .NET serializer is required by this narrow reader.
+    Dim result As New System.Collections.Generic.Dictionary(Of String,Double)()
+    Dim text As String = System.IO.File.ReadAllText(path,System.Text.Encoding.UTF8)
+    Dim rx As New System.Text.RegularExpressions.Regex("""(?<key>[A-Za-z0-9_]+)""\s*:\s*(?<value>-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)")
+    For Each m As System.Text.RegularExpressions.Match In rx.Matches(text)
+        Dim key As String = m.Groups("key").Value
+        Dim value As Double = Double.Parse(m.Groups("value").Value,System.Globalization.CultureInfo.InvariantCulture)
+        If Double.IsNaN(value) OrElse Double.IsInfinity(value) Then Throw New Exception("Nonfinite input: " & key)
+        result.Add(key,value)
+    Next
+    Dim expected() As String = {"schema_version","L1_base","L2_base","D_base","Theta","Phi","ScaleFactor","Nx","Ny","Nz","stl_tolerance_mm"}
+    If result.Count <> expected.Length Then Throw New Exception("Use the supplied flat numeric parameter JSON schema.")
+    For Each key As String In expected
+        If Not result.ContainsKey(key) Then Throw New Exception("Missing parameter: " & key)
+    Next
+    If result("schema_version") <> 1 Then Throw New Exception("Expected schema_version 1.")
+    For Each axis As String In New String(){"Nx","Ny","Nz"}
+        Dim n As Double=result(axis)
+        If n<>Math.Floor(n) OrElse n<1 OrElse n>10 Then Throw New Exception("Repeat counts must be integers 1..10.")
+    Next
+    Return result
+End Function
+
+Sub AddP(up As Inventor.UserParameters, name As String, expression As String, units As String)
+    Dim p As Inventor.UserParameter = up.AddByExpression(name, expression, units)
+    p.Comment = "Auxetic generator; independent inputs and formula dependencies documented in GUIDE_KO.md"
+End Sub

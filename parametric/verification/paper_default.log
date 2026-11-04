@@ -1,0 +1,32 @@
+{
+  "theta_deg": 22.5,
+  "phi_deg": 22.5,
+  "b_mm": 27.25896641474141,
+  "a_mm": 11.291033585258592,
+  "c_mm": 19.275000000000002,
+  "half_pitch_mm": 38.55,
+  "cell_pitch_mm": 77.1,
+  "l1_mm": 27.25896641474141,
+  "l2_mm": 41.72621932127179,
+  "l3_mm": 29.504892635348423,
+  "radii_mm": [
+    2.790783152310571,
+    2.790783152310571,
+    2.790783152310571
+  ],
+  "nominal_mu": 0.10000000000000002,
+  "repeat": [
+    2,
+    2,
+    2
+  ],
+  "stl_tolerance_mm": 0.05
+}
+Unit graph verified {'nodes': 32, 'struts': 54, 'strut_types': {1: 6, 2: 24, 3: 24}, 'connected_components': 1, 'node_degree_counts': {5: 6, 1: 6, 6: 8, 2: 12}, 'nonincident_pairs_checked': 1239, 'minimum_nonincident_capsule_clearance_mm': 8.218083629756796}
+Fusing 54 cylindrical struts...
+Unit STEP and STL validated {'brep': {'valid': True, 'solids': 1, 'volume_mm3': 38280.383889929304, 'bbox_mm': [77.1, 77.1, 77.1], 'faces': 132}, 'step_reimport': {'valid': True, 'solids': 1, 'volume_mm3': 38280.38390960102, 'bbox_mm': [77.1, 77.1, 77.1], 'faces': 132}, 'step_relative_volume_error': 5.138850127450874e-10, 'stl': {'triangles': 15828, 'vertices': 7870, 'boundary_edges': 0, 'nonmanifold_edges': 0, 'orientation_errors': 0, 'degenerate_triangles': 0, 'signed_volume_mm3': 38245.41375469922, 'weld_tolerance_mm': 1e-05}, 'stl_relative_volume_error': 0.0009135262418118902}
+Lattice graph verified {'nodes': 244, 'struts': 432, 'strut_types': {1: 48, 2: 192, 3: 192}, 'connected_components': 1, 'node_degree_counts': {5: 48, 1: 24, 6: 64, 2: 108}, 'nonincident_pairs_checked': 91548, 'minimum_nonincident_capsule_clearance_mm': 8.218083629756796}
+Fusing 8 unit cells at 12 periodic joints...
+All CAD and mesh validations passed
+Completed in 69.2s: /workspace/auxetic-3d/parametric/generated/paper_default.building-vwzqol52
+생성 및 검증 완료: /workspace/auxetic-3d/parametric/generated/paper_default

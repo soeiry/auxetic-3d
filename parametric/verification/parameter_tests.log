@@ -1,0 +1,15 @@
+test_extreme_angle (test_parameters.ParametersTest.test_extreme_angle) ... ok
+test_negative_diameter (test_parameters.ParametersTest.test_negative_diameter) ... ok
+test_nonfinite (test_parameters.ParametersTest.test_nonfinite) ... ok
+test_nonincident_collision_rejected (test_parameters.ParametersTest.test_nonincident_collision_rejected) ... ok
+test_noninteger_repeat (test_parameters.ParametersTest.test_noninteger_repeat) ... ok
+test_reference_size (test_parameters.ParametersTest.test_reference_size) ... ok
+test_repetition_boundaries (test_parameters.ParametersTest.test_repetition_boundaries) ... ok
+test_too_short_axial_connector (test_parameters.ParametersTest.test_too_short_axial_connector) ... ok
+test_uniform_scale_preserves_angles_and_density (test_parameters.ParametersTest.test_uniform_scale_preserves_angles_and_density) ... ok
+test_zero_repeat (test_parameters.ParametersTest.test_zero_repeat) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.008s
+
+OK

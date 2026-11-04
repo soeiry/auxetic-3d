@@ -1,0 +1,59 @@
+{
+  "cadquery_executed": true,
+  "inventor_installed": false,
+  "inventor_executed": false,
+  "inventor_rules_compiled": false,
+  "ipt_files_generated": false,
+  "parameter_tests": {
+    "passed": 10,
+    "failed": 0
+  },
+  "cases": {
+    "paper_default": {
+      "input": {
+        "schema_version": 1,
+        "L1_base": 27.25896641474141,
+        "L2_base": 41.72621932127179,
+        "D_base": 5.581566304621142,
+        "Theta": 22.5,
+        "Phi": 22.5,
+        "ScaleFactor": 1.0,
+        "Nx": 2,
+        "Ny": 2,
+        "Nz": 2,
+        "stl_tolerance_mm": 0.05
+      },
+      "cell_pitch_mm": 77.1,
+      "unit_volume_mm3": 38280.383889929304,
+      "boundary_joints": 12,
+      "minimum_nonincident_clearance_mm": 8.218083629756796,
+      "step_reimport_solids": [
+        1,
+        1
+      ]
+    },
+    "angle_diameter_example": {
+      "input": {
+        "schema_version": 1,
+        "L1_base": 27.25896641474141,
+        "L2_base": 41.72621932127179,
+        "D_base": 5.0,
+        "Theta": 20.0,
+        "Phi": 25.0,
+        "ScaleFactor": 0.5,
+        "Nx": 2,
+        "Ny": 2,
+        "Nz": 2,
+        "stl_tolerance_mm": 0.05
+      },
+      "cell_pitch_mm": 40.713288788559154,
+      "unit_volume_mm3": 3977.155099585058,
+      "boundary_joints": 12,
+      "minimum_nonincident_clearance_mm": 4.072315065971377,
+      "step_reimport_solids": [
+        1,
+        1
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "L1_base": 27.25896641474141,
+  "L2_base": 41.72621932127179,
+  "D_base": 5.0,
+  "Theta": 20.0,
+  "Phi": 25.0,
+  "ScaleFactor": 0.5,
+  "Nx": 2,
+  "Ny": 2,
+  "Nz": 2,
+  "stl_tolerance_mm": 0.05
+}
